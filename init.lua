@@ -18,7 +18,7 @@ require("lazy").setup({
   { "nvim-treesitter/nvim-treesitter", build = ":TSUpdate" },
   "nvim-lualine/lualine.nvim",
   { "nvim-telescope/telescope.nvim",   tag = "0.1.8",      dependencies = { "nvim-lua/plenary.nvim" } },
-  
+
   {
     "lukas-reineke/indent-blankline.nvim",
     main = "ibl",
@@ -52,7 +52,28 @@ require("lazy").setup({
       })
     end
   },
-
+  {
+    "ray-x/lsp_signature.nvim",
+    event = "VeryLazy",
+    config = function() 
+      require("lsp_signature").setup({
+        bind = true,
+        handler_opts = {
+          border = "rounded"
+        },
+        hint_enable = true,
+        hint_prefix = "->",
+        hint_scheme = "String",
+        hi_parameter = "LspSignatureActiveParameter",
+        always_trigger = false,
+        max_height = 12,
+        max_width = 80,
+        floating_window = true,
+        floating_window_above_curl_line = true,
+        toggle_key = '<C-s>'
+      })
+    end
+  },
   -- ===== UTILITIES =====
   "nvim-lua/plenary.nvim",
   "mfussenegger/nvim-dap",
@@ -85,6 +106,8 @@ require("lazy").setup({
       "MunifTanjim/nui.nvim",
     }
   },
+
+  { "neovim/nvim-lspconfig", },
 
   -- ===== BUFFER LINE =====
   {
@@ -122,7 +145,198 @@ require("lazy").setup({
 
   })
 
---------------------------------------------------------------------------------
+-- Correct project root detection (CMake / Git)
+local function get_project_root()
+  local buf_path = vim.fn.expand('%:p:h')
+  if buf_path == '' or buf_path == nil then
+    return vim.fn.getcwd()
+  end
+
+  local root = vim.fs.find(
+    { 'CMakeLists.txt', '.git'},
+    { upward = true, path = buf_path }
+  )[1]
+
+  return root and vim.fs.dirname(root) or vim.fn.getcwd()
+end
+
+vim.api.nvim_create_autocmd("BufEnter", {
+  callback = function()
+    local root = get_project_root()
+    if root and root ~= '' and vim.fn.getcwd() ~= root then
+      vim.cmd("cd " .. vim.fn.fnameescape(root))
+    end
+  end,
+})
+
+local function has_cmake()
+  return vim.fn.filereadable("CMakeLists.txt") == 1
+end
+
+local Terminal = require("toggleterm.terminal").Terminal
+local build_term = Terminal:new({
+  direction = 'float',
+  close_on_exit = false,
+  shell = 'zsh'
+})
+
+local npm_dev = Terminal:new({
+  cmd = "npm run dev",
+  direction = "float",
+  close_on_exit = false,
+  shell = "zsh",
+  cwd = function()
+    return get_project_root()
+  end
+})
+local function run_in_toggleterm(cmd)
+  if not build_term:is_open() then
+    build_term:open()
+  else
+    build_term:focus()
+  end
+  vim.defer_fn(function()
+    if build_term.job_id then
+      vim.api.nvim_chan_send(build_term.job_id, cmd .. "\n")
+    else
+      vim.notify("Terminal not ready", vim.log.levels.ERROR)
+    end
+  end, 200)
+end
+
+-- ===== Nvim-DAP (C++ / SDL3) =====
+
+local dap = require('dap')
+local dapui = require('dapui')
+
+dapui.setup()
+
+dap.adapters.cppdbg = {
+  id = 'cppdbg',
+  type = 'executable',
+  command = vim.fn.stdpath("data") .. '/mason/bin/OpenDebugAD7',
+}
+
+dap.configurations.cpp = {
+  {
+    name = "Debug SDL3 (CMake)",
+    type = "cppdbg",
+    request = "launch",
+    program = function ()
+      return get_project_root() .. "/build/game"
+    end,
+
+    cwd = function()
+      return get_project_root()
+    end,
+    stopAtEntry = false,
+    MIMode = "gdb",
+    setupCommands = {
+      {
+        description = "Enable pretty printing",
+        text = "-enable-pretty-printing",
+        ignoreFailures = true,
+      },
+    },
+  }
+}
+
+dap.configurations.c = dap.configurations.cpp
+
+-- Debug keymaps
+vim.keymap.set('n', '<F5>', function()
+  if has_cmake() then
+    -- CMake + DAP
+  local exe = get_project_root() .. "/build/game"
+  if vim.fn.filereadable(exe) == 0 then
+    vim.notify("Binary not found, run <leader>mb first", vim.log.levels.WARN)
+    return
+  end
+  require("dap").run(require("dap").configurations.cpp[1])
+  else
+    -- Direct compilation
+    local file = vim.fn.expand('%:p')
+    local output = vim.fn.expand('%:r')
+
+    local cmd = string.format(
+      "g++ -std=c++20 -Wall -Wextra %s -o %s && ./%s",
+      file, output, output
+    )
+    run_in_toggleterm(cmd)
+  end
+end, { desc = 'DAP Continue' })
+
+vim.keymap.set('n', '<F10>', dap.step_over, { desc = 'DAP Step Over' })
+vim.keymap.set('n', '<F11>', dap.step_into, { desc = 'DAP Step Into' })
+vim.keymap.set('n', '<F12>', dap.step_out, { desc = 'DAP Step Out' })
+vim.keymap.set('n', '<leader>db', dap.toggle_breakpoint, { desc = 'DAP Toggle Breakpoint' })
+
+dap.listeners.after.event_initialized["dapui"] = function()
+  dapui.open()
+end
+dap.listeners.before.event_terminated["dapui"] = function()
+  dapui.close()
+end
+dap.listeners.before.event_exited["dapui"] = function()
+  dapui.close()
+end
+
+-- ===== FIXED CMake RUN (SDL3) =====
+vim.keymap.set('n', '<leader>mr', function()
+  local project_dir = get_project_root()
+  local Terminal = require('toggleterm.terminal').Terminal
+  
+  local cmd = [[
+    set -e
+    cd "]] .. project_dir .. [["
+    cmake -B build -S .
+    cmake --build build -j$(nproc)
+    cd build
+    ./game
+    echo ""
+    echo "Program finished. Press Ctrl+A to exit."
+    ]]
+    run_in_toggleterm(cmd)
+end, { desc = 'CMake Build & Run (fixed root)' })
+
+vim.keymap.set('n', '<leader>mx', function()
+  local cmd = table.concat({
+    'echo "🔍 Checking build environment..."',
+    'echo "CWD: $(pwd)"',
+    'echo "PATH: $PATH"',
+    'which cmake || echo "Error: cmake: NOT FOUND"',
+    'which g++ || echo "Error: g++: NOT FOUND"',
+    'which make || echo "Error: make: NOT FOUND"',
+    'cmake --version | head -1',
+    'echo ""',
+    'echo "📁 Current project:"',
+    'ls -la CMakeLists.txt 2>/dev/null && echo "✅ CMakeLists.txt exists" || echo "Error: CMakeLists.txt not found"',
+    'echo ""',
+    'echo "Press Ctrl+A to exit."'
+  }, ' && ')
+  run_in_toggleterm(cmd)
+end, {desc = 'Check build environment'})
+
+vim.keymap.set('n', '<leader>mR', function()
+  local project_dir = get_project_root()
+
+  local cmd = table.concat({
+    'set -e',
+    'cd "' .. project_dir .. '"',
+    'echo "🔄 Reconfiguring CMake..."',
+    'rm -rf build',
+    'cmake -B build -S .',
+    'echo "🔨 Building..."',
+    'cmake --build build -j$(nproc)',
+    'echo "🎮 Running..."',
+    'cd build',
+    './game',
+    'echo ""',
+    'echo "🎯 Program finished. Press Ctrl+A to exit."'
+  }, ' && ')
+
+  run_in_toggleterm(cmd)
+end, { desc = 'CMake Clean Build & Run' })
 
 --- ===== BASIC SETTINGS ===== ---
 vim.opt.termguicolors = true
@@ -276,24 +490,17 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'c', 'cpp' },
-  callback = function()
-    vim.lsp.start({
-      name = 'clangd',
-      cmd = {
-        "clangd",
-        "--background-index",
-        "--clang-tidy",
-        "--header-insertion=never",
-        "--all-scopes-completion",
-        "--completion-style=detailed",
-      },
-      capabilities = capabilities,
-      root_dir = vim.fs.dirname(vim.fs.find({ 'compile_commands.json', 'CMakeLists.txt', '.git' }, { upward = true })[1]),
-    })
-  end,
-})
+
+vim.lsp.config.clangd = {
+  capabilities = capabilities,
+  cmd = { "clangd",
+  "--background-index",
+  "--clang-tidy",
+  "--compile-commands-dir=build"
+  },
+}
+
+vim.lsp.enable("clangd")
 
 -- Emmet LSP
 vim.api.nvim_create_autocmd('FileType', {
@@ -307,6 +514,97 @@ vim.api.nvim_create_autocmd('FileType', {
     })
   end,
 })
+
+-- Automaticly generate compile_commands.json at changing CMakeLists.txt file
+vim.api.nvim_create_autocmd({"BufWritePost"}, {
+  pattern = "CMakeLists.txt",
+  callback = function()
+    local project_dir = get_project_root()
+    local build_dir = project_dir .. '/build'
+
+    if vim.fn.isdirectory(build_dir) == 1 then
+      vim.fn.jobstart({'sh', '-c',
+      'cd "' .. project_dir .. '" && ' ..
+      'cmake -B build -S .'
+      },
+      {
+        on_exit = function(_, code)
+        if code == 0 then
+          vim.notify("✅ CMake reconfigured", vim.log.levels.INFO)
+        else
+          vim.notify("❌ CMake reconfiguration failed", vim.log.levels.ERROR)
+    end
+  end
+    })
+    end
+  end,
+})
+
+vim.keymap.set('n', '<leader>pv', function()
+  local project_dir = get_project_root()
+  local dirs = {
+    'src',
+    'include',
+    'lib',
+    'SDL',
+    'assets',
+    'build'
+  }
+
+  local message = "📁 Project Structure:\n\n"
+
+  for _, dir in ipairs(dirs) do
+    local full_path = project_dir .. '/' .. dir
+    if vim.fn.isdirectory(full_path) == 1 then
+      -- Считаем файлы
+      local count = 0
+      if dir == 'src' or dir == 'include' or dir == 'assets' then
+        count = tonumber(vim.fn.system('find "' .. full_path .. '" -type f | wc -l')) or 0
+        message = message .. string.format("✅ %s/ (%d files)\n", dir, count)
+      else
+        message = message .. string.format("✅ %s/\n", dir)
+      end
+    else
+      message = message .. string.format("❌ %s/\n", dir)
+    end
+  end
+
+  if vim.fn.filereadable(project_dir .. '/CMakeLists.txt') == 1 then
+    message = message .. "\n✅ CMakeLists.txt"
+  else
+    message = message .. "\n❌ CMakeLists.txt"
+  end
+
+  vim.notify(message, vim.log.levels.INFO, { title = "Project Check" })
+end, { desc = 'Verify project structure' })
+
+vim.keymap.set('n', '<leader>?', function()
+  vim.notify([[
+🎮 C++ Project Commands (CMake only):
+  
+Main Command:
+  <F5> - Build & Run project (auto-detects/creates CMakeLists.txt)
+  
+CMake Commands:
+  <leader>mc - Clean configure CMake
+  <leader>mb - Build only
+  <leader>mr - Build & Run
+  <leader>mC - Clean build directory
+  <leader>mj - Generate compile_commands.json for LSP
+  <leader>mR - Cmake Clean Build & Run
+  <leader>mx - Check build environment
+  
+Project Navigation:
+  <leader>ps - Open src/
+  <leader>pi - Open include/
+  <leader>pa - Open assets/
+  <leader>pb - Open build/
+  <leader>ch - Switch header/source
+  <leader>pv - Verify project structure
+  
+Note: Press Ctrl+\\ to open terminal, Ctrl+D to exit.
+  ]], vim.log.levels.INFO, { title = "Help: CMake Commands" })
+end, { desc = 'Show CMake commands help' })
 
 --- ===== AUTOCOMPLETION (CMP) ===== ---
 local cmp = require('cmp')
@@ -362,40 +660,13 @@ require("luasnip.loaders.from_vscode").lazy_load()
 
 --- ===== PLUGIN CONFIGURATION ===== ---
 
--- Automatic Terminal directory SYNC
-vim.api.nvim_create_autocmd({"BufEnter", "DirChanged"}, {
-  callback = function()
-    local current_file_dir = vim.fn.expand('%:p:h')
-
-    if current_file_dir ~= "" and vim.fn.isdirectory(current_file_dir) == 1 then
-      vim.cmd("cd " .. vim.fn.fnameescape(current_file_dir))
-
-      local terminals = require("toggleterm.terminal")
-      for _, term in ipairs(terminals.get_all()) do
-
-        if term:is_open() and term.job_id then
-          local ok, err = pcall(function()
-            vim.api.nvim_chan_send(term.job_id, "cd " .. vim.fn.shellescape(current_file_dir) .. "\n")
-          end)
-
-        end
-      end
-    end
-  end
-})
-
 require('toggleterm').setup({
   open_mapping = [[<c-\>]],
   direction = 'float',
+  shell = 'zsh',
 
-  on_create = function(term)
-    local current_file_dir = vim.fn.expand('%:p:h')
-    if current_file_dir ~= "" and vim.fn.isdirectory(current_file_dir) == 1 then
-      vim.defer_fn(function()
-        vim.api.nvim_chan_send(term.job_id, "cd " .. vim.fn.shellescape(current_file_dir) .. "\n")
-        vim.api.nvim_chan_send(term.job_id, "clear\n")
-      end, 100)
-    end
+  cwd = function()
+    return get_project_root()
   end,
 })
 
@@ -405,7 +676,7 @@ local dashboard = require("alpha.themes.dashboard")
 
 dashboard.section.header.val = {
   "                                      ",
-  "          Welcome to Neovim!          ",
+  "          Neovim.                     ",
   "          Editing evolved.            ",
   "                                      ",
 }
@@ -475,7 +746,14 @@ require('telescope').setup({
 -- Neo-tree
 require("neo-tree").setup({
   close_if_last_window = true,
+
   filesystem = {
+    bind_to_cwd = true,
+
+    follow_current_file = {
+      enabled = true,
+      leave_dirs_open = true,
+    },
     filtered_items = {
       visible = true,
       hide_dotfiles = false,
@@ -483,6 +761,70 @@ require("neo-tree").setup({
     }
   }
 })
+
+-- Project structure navigation
+vim.keymap.set('n', '<leader>ps', function()
+  if vim.fn.isdirectory('src') == 1 then
+    vim.cmd('edit src/')
+  else
+    vim.notify(" src/ directory not found", vim.log.levels.WARN)
+  end
+end, { desc = 'Open src directory' })
+
+vim.keymap.set('n', '<leader>pi', function()
+  if vim.fn.isdirectory('include') == 1 then
+    vim.cmd('edit include/')
+  else
+    vim.notify(" include/ directory not found", vim.log.levels.WARN)
+  end
+end, { desc = 'Open include directory' })
+
+vim.keymap.set('n', '<leader>pa', function()
+  if vim.fn.isdirectory('assets') == 1 then
+    vim.cmd('edit assets/')
+  else
+    vim.notify(" assets/ directory not found", vim.log.levels.WARN)
+  end
+end, { desc = 'Open assets directory' })
+
+vim.keymap.set('n', '<leader>pb', function()
+  if vim.fn.isdirectory('build') == 1 then
+    vim.cmd('edit build/')
+  else
+    vim.notify(" build/ directory not found", vim.log.levels.WARN)
+  end
+end, { desc = 'Open build directory' })
+
+-- Switch between header and source
+vim.keymap.set('n', '<leader>ch', function()
+  local current_file = vim.fn.expand('%:p')
+  local file_name = vim.fn.expand('%:t:r')
+  local ext = vim.fn.expand('%:e')
+
+  if current_file:match('/src/') and (ext == 'cpp' or ext == 'c') then
+
+    local header_file = vim.fn.expand('%:p:h:h') .. '/include/' .. file_name .. '.h'
+    if vim.fn.filereadable(header_file) == 1 then
+      vim.cmd('edit ' .. header_file)
+    else
+      vim.notify('Header not found: ' .. header_file, vim.log.levels.WARN)
+    end
+  elseif current_file:match('/include/') and ext == 'h' then
+    -- Из include в src
+    local src_file = vim.fn.expand('%:p:h:h') .. '/src/' .. file_name .. '.cpp'
+    if vim.fn.filereadable(src_file) == 1 then
+      vim.cmd('edit ' .. src_file)
+    else
+      -- Проверяем .c файл
+      src_file = vim.fn.expand('%:p:h:h') .. '/src/' .. file_name .. '.c'
+      if vim.fn.filereadable(src_file) == 1 then
+        vim.cmd('edit ' .. src_file)
+      else
+        vim.notify('Source file not found', vim.log.levels.WARN)
+      end
+    end
+  end
+end, { desc = 'Switch header/source' })
 
 -- Barbar
 require('barbar').setup({
@@ -503,35 +845,6 @@ require('barbar').setup({
 
 -- Git signs
 require('gitsigns').setup()
-
--- ToggleTerm
-local Terminal = require("toggleterm.terminal").Terminal
-
-require('toggleterm').setup({
-  open_mapping = [[<c-\>]],
-  direction = 'float'
-})
-
-vim.api.nvim_create_autocmd("TermOpen", {
-  pattern = "term://*",
-  callback = function()
-    vim.defer_fn(function()
-      local current_file_dir = vim.fn.expand('%:p:h')
-
-      if current_file_dir ~= "" and vim.fn.isdirectory(current_file_dir) == 1 then
-        vim.cmd("lcd " .. vim.fn.fnameescape(current_file_dir))
-
-        vim.api.nvim_input("cd " .. current_file_dir .. "<CR>")
-        vim.api.nvim_input("clear<CR>")
-      else
-
-        local cwd = vim.fn.getcwd()
-        vim.api.nvim_input("cd " .. cwd .. "<CR>")
-        vim.api.nvim_input("clear<CR>")
-      end
-    end, 50)
-  end,
-})
 
 -- Keybinding for Terminal
 vim.api.nvim_set_keymap('t', '<C-a>', [[<Cmd>ToggleTerm<CR>]],
@@ -561,7 +874,11 @@ require('nvim-highlight-colors').setup({
 require('nvim-ts-autotag').setup()
 
 -- Clangd extensions
-require('clangd_extensions').setup({})
+require('clangd_extensions').setup({
+  server = {
+    autostart = false,
+  }  
+})
 
 -- Emmet configuration
 vim.g.user_emmet_mode = 'a'
@@ -605,33 +922,31 @@ vim.keymap.set('n', '<leader>fh', function() require 'telescope.builtin'.help_ta
 vim.keymap.set('n', '<C-a>', ':ToggleTerm<CR>', { desc = 'Toggle Terminal' })
 vim.keymap.set('n', '<leader>fc', ':ColorizerToggle<CR>', { desc = 'Toggle Colorizer' })
 vim.keymap.set('n', '<leader>cd', function()
-  local current_file_dir = vim.fn.expand('%:p:h')
-  if current_file_dir ~= "" and vim.fn.isdirectory(current_file_dir) == 1 then
-    vim.cmd("cd " .. vim.fn.fnameescape(current_file_dir))
-    vim.notify("📁 Working directory changed to: " .. current_file_dir)
+  local dir = get_project_root()
+  if dir == '' then return end
 
+  vim.notify("Sync terminals to: " .. dir)
 
-    local terminals = require("toggleterm.terminal")
-    for _, term in ipairs(terminals.get_all()) do
-      if term:is_open() then
-        vim.api.nvim_chan_send(term.job_id, "cd " .. vim.fn.shellescape(current_file_dir) .. "\n")
-      end
+  local terminals = require("toggleterm.terminal")
+  for _, term in ipairs(terminals.get_all()) do
+    if term:is_open() then
+      vim.api.nvim_chan_send(term.job_id, "cd " .. vim.fn.shellescape(dir) .. "\n")
     end
   end
 end, { desc = 'Sync terminal to current file directory' })
 
 -- Web development (Live Server)
 vim.keymap.set('n', '<leader>ls', function()
-  local dir = vim.fn.expand('%:p:h')
+  local dir = get_project_root()
   if dir == '' then dir = vim.fn.getcwd() end
 
   local check = vim.fn.system('which live-server')
   if vim.v.shell_error ~= 0 then
-    vim.notify("❌ live-server not downloaded. Launch: npm install -g live-server", vim.log.levels.ERROR)
+    vim.notify(" live-server not downloaded. Launch: npm install -g live-server", vim.log.levels.ERROR)
     return
   end
 
-  vim.notify("🚀 Launchin Live Server...")
+  vim.notify(" Launchin Live Server...")
 
   local handle = vim.fn.jobstart('live-server --port=8000 --no-browser', {
     cwd = dir,
@@ -645,34 +960,114 @@ vim.keymap.set('n', '<leader>ls', function()
       local browser_handle = vim.fn.jobstart('xdg-open http://localhost:8000', {
         detach = true
       })
-      vim.notify("🌐 Live Server launched: http://localhost:8000")
-      vim.notify("✨ Changes will update automatically!")
+      vim.notify(" Live Server launched: http://localhost:8000")
+      vim.notify(" Changes will update automatically!")
     end, 2000)
   else
-    vim.notify("❌ Failed to launch Live Server", vim.log.levels.ERROR)
+    vim.notify(" Failed to launch Live Server", vim.log.levels.ERROR)
   end
 end, { desc = 'Start Live Server' })
 
--- Остановка Live Server
+-- Stop Live Server
 vim.keymap.set('n', '<leader>lq', function()
   vim.fn.jobstart('pkill -f "live-server"', { detach = true })
-  vim.notify("🛑 Live Server stopped")
+  vim.notify(" Live Server stopped")
 end, { desc = 'Stop Live Server' })
 
 -- NPM commands
-vim.keymap.set('n', '<leader>nb', ':ToggleTerm size=10 direction=float cmd="npm run build"<CR>',
+vim.keymap.set('n', '<leader>nb', function() run_in_toggleterm('npm run build') end,
   { desc = 'NPM Build' })
-vim.keymap.set('n', '<leader>nd', ':ToggleTerm size=10 direction=float cmd="npm run dev"<CR>', { desc = 'NPM Dev' })
-vim.keymap.set('n', '<leader>ni', ':ToggleTerm size=10 direction=float cmd="npm install"<CR>',
+vim.keymap.set('n', '<leader>nd', function()
+  npm_dev:toggle()
+end, { desc = 'NPM dev'})
+vim.keymap.set('n', '<leader>ni', function () run_in_toggleterm('npm install') end,
   { desc = 'NPM Install' })
 
 -- C++ commands (CMake)
-vim.keymap.set('n', '<leader>cb', ':!cmake -B build -S .<CR>', { desc = 'CMake Build' })
-vim.keymap.set('n', '<leader>cm', ':!make -C build<CR>', { desc = 'CMake Make' })
-vim.keymap.set('n', '<leader>cr', function()
-  local executable = vim.fn.input('Executable: ', './build/', 'file')
-  vim.cmd('!./' .. executable)
-end, { desc = 'CMake Run' })
+
+vim.keymap.set('n', '<leader>mc', function()
+  local project_dir = get_project_root()
+
+  local cmd = [[
+cd "]] .. project_dir .. [["
+echo "🛠️ Configuring CMake..."
+
+rm -rf build
+
+if ! command -v cmake >/dev/null; then
+  echo "❌ CMake not found"
+  return
+fi
+
+cmake -B build -S .
+if [ $? -ne 0 ]; then
+  echo "❌ CMake configuration failed"
+  return
+fi
+
+echo "✅ CMake configured successfully"
+echo ""
+echo "Press Ctrl+A to exit."
+]]
+
+  run_in_toggleterm(cmd)
+end, { desc = 'CMake Configure' })
+
+
+
+vim.keymap.set('n', '<leader>mb', function()
+  local project_dir = get_project_root()
+  if project_dir == '' then project_dir = vim.fn.getcwd() end
+
+  local build_dir = project_dir .. '/build'
+  if vim.fn.isdirectory(build_dir) == 0 then
+    vim.notify("Error: Build directory not found. Run <leader>mc first", vim.log.levels.ERROR)
+    return
+  end
+
+  local cmd = [[
+    cd "]] .. project_dir .. [["
+    echo "🔨 Building project..."
+
+    if ! command -v cmake >/dev/null; then
+      echo "❌ CMake not found"
+      exit 1
+    fi
+
+    cmake --build build -j$(nproc)
+    BUILD_STATUS=$?
+
+    if [ $BUILD_STATUS -ne 0 ]; then
+      echo "❌ Build failed"
+      exit 1
+    fi
+
+    echo "✅ Build successful"
+
+    ls -la build | grep -E 'game|SDL' || echo "⚠️ No executable found in build/"
+
+    echo ""
+    echo "Press Ctrl+A to exit."
+  ]]
+
+  run_in_toggleterm(cmd)
+end, { desc = 'CMake Build' })
+
+vim.keymap.set('n', '<leader>mC', function()
+  local project_dir = get_project_root()
+
+  local cmd = table.concat({
+    'cd "' .. project_dir .. '"',
+    'echo "🧹 Cleaning build directory..."',
+    'rm -rf build',
+    'mkdir -p build',
+    'echo "✅ Build directory cleaned."',
+    'echo ""',
+    'echo "Press Ctrl+A to exit."'
+  }, ' && ')
+
+  run_in_toggleterm(cmd)
+end, { desc = 'CMake Clean' })
 
 -- Git
 vim.keymap.set('n', '<leader>gg', ':Git<CR>', { desc = 'Git Status' })
@@ -694,99 +1089,16 @@ vim.api.nvim_create_autocmd({ "BufRead", "BufNewFile" }, {
   end
 })
 
--- C++ projects settings and keymaps
-vim.api.nvim_create_autocmd({"BufRead", "BufNewFile"}, {
-  pattern = {"*.cpp", "*.hpp", "*.c", "*.h"},
+-- C++ projects
+vim.api.nvim_create_autocmd({"BufRead", "BufNewFile" }, {
+  pattern = { "*.cpp", "*.h", "*.hpp", "*.txt", "*.c"},
   callback = function()
-
     vim.bo.tabstop = 4
     vim.bo.shiftwidth = 4
     vim.bo.expandtab = true
-
-    vim.keymap.set('n', '<F5>', function()
-      vim.cmd('w')
-
-      local project_dir = vim.fn.expand('%:p:h')
-      local filename = vim.fn.expand('%:t')
-      local output_name = vim.fn.expand('%:t:r')
-      local term_name = "cpp_run_" .. output_name
-      local compile_cmd
-      local project_type
-      local final_command_chain
-      local run_cmd = string.format('./"%s"', output_name)
-
-      local has_sdl = vim.fn.isdirectory(project_dir .. '/SDL') == 1
-      local has_bgfx = vim.fn.isdirectory(project_dir .. '/bgfx') == 1
-
-      if has_sdl or has_bgfx then
-          project_type = "SDL/GameDev"
-          
-          local include_flags = "-I/usr/include/SDL3 -I/usr/include/SDL3_image -I./SDL"
-
-          local link_flags = "-lSDL3 -lSDL3_image -lpng -ljpeg -ltiff -lwebp -lz"
-          
-          local rpath_flag = "-Wl,-rpath,/usr/lib"
-
-          compile_cmd = string.format(
-              'g++ -g "%s" -o "%s" %s -L. %s %s -std=c++17',
-              filename, output_name, include_flags, link_flags, rpath_flag
-          )
-
-          local run_cmd_with_path = string.format(
-          'LD_LIBRARY_PATH=/usr/lib:$LD_LIBRARY_PATH ./"%s"', output_name
-          )
-
-          final_command_chain = string.format(
-              'stty -echo; echo "--- RUNNING %s ---" && %s && %s; exit',
-              project_type, compile_cmd, run_cmd_with_path
-          )
-      else
-          project_type = "Standard C++"
-          compile_cmd = string.format('g++ -g "%s" -o "%s" -std=c++17', filename, output_name)
-
-
-          local pause_cmd = 'stty echo; echo "" && echo -n "--- Programm finished. Press ENTER to close. ---" && read; exit'
-
-          local run_sequence = string.format('stty echo; %s; stty -echo', run_cmd)
-
-
-          final_command_chain = string.format(
-              'stty -echo; echo "--- RUNNING %s ---" && %s && %s && %s || (stty echo; echo "Compilation failed or executable not found." && read; exit)',
-              project_type, compile_cmd, run_sequence, pause_cmd
-          )
-      end
-
-      local term = require('toggleterm.terminal').Terminal:new({
-        name = term_name,
-        direction = 'float',
-        close_on_exit = true,
-        hidden = false,
-        cmd = vim.fn.exepath('zsh'),
-
-        on_open = function(t)
-          if vim.b[t.bufnr] and vim.b[t.bufnr].cpp_command_executed then
-              vim.cmd("startinsert!")
-              return
-          end
-
-          vim.defer_fn(function()
-            local setup_cmd = string.format("cd %s; clear", vim.fn.shellescape(project_dir))
-            vim.api.nvim_chan_send(t.job_id, setup_cmd .. "\n")
-            vim.api.nvim_chan_send(t.job_id, final_command_chain .. "\n")
-
-            vim.b[t.bufnr].cpp_command_executed = true
-          end, 100)
-
-          vim.cmd("startinsert!")
-        end
-      })
-
-      term:toggle()
-
-      vim.notify("🚀 Compile and launch... " .. project_type .. " в ToggleTerm...")
-
-    end, { buffer = true, desc = 'Compile & Run C++ Project (Smart F5)' })
-
+    vim.bo.smartindent = true
+    
+    vim.bo.cinoptions = vim.bo.cinoptions .. ":0,g0,N-s,(0,w1,W4"
+    vim.bo.cindent = true
   end
 })
-return
