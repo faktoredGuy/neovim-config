@@ -1,21 +1,19 @@
-local opts = {
-  {
-    'gisketch/triforce.nvim',
-    dependencies = { 'nvzone/volt' },
-    opts = {
-      custom_languages = {
-        odin = { icon = '🔷', name = 'Odin' },
-      },
-      notifications = {
-        enabled = true,
-        level_up = true,
-        achievements = true,
-      },
-      keymap = {
-        show_profile = '<leader>tt',
-      },
-    },
-  }
-}
+return {
+  'gisketch/triforce.nvim',
+  dependencies = { 'nvzone/volt' },
+  cmd = { "Triforce" },
 
-require('triforce').setup(opts)
+  opts = {
+    custom_languages = {
+      odin = { icon = '🔷', name = 'Odin' },
+    },
+    notifications = {
+      enabled = true,
+      level_up = true,
+      achievements = true,
+    },
+    keymap = {
+      show_profile = '<leader>tt',
+    },
+  },
+}
