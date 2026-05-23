@@ -13,14 +13,10 @@ map('n', '<c-7>', '<cmd>BufferGoto 7<cr>', { desc = 'buffer 7' })
 map('n', '<c-8>', '<cmd>BufferGoto 8<cr>', { desc = 'buffer 8' })
 map('n', '<c-9>', '<cmd>BufferGoto 9<cr>', { desc = 'buffer 9' })
 map('n', '<c-0>', '<cmd>BufferLast<cr>', { desc = 'last buffer' })
-map('n', '<c-w>', '<cmd>BufferClose<cr>', { desc = 'close buffer' })
+map('n', '<c-q>', '<cmd>BufferClose<cr>', { desc = 'close buffer' })
 
 -- neo-tree
 map('n', '<leader>e', '<cmd>Neotree toggle<cr>', { desc = 'explorer neotree' })
-
--- terminal
-map('n', '<c-q>', '<cmd>ToggleTerm<cr>', { desc = 'toggle terminal' })
-map('t', '<C-q>', '<cmd>ToggleTerm<cr>', { noremap = true, silent = true })
 
 map('n', '<leader>cd', function()
   local dir = require("user.utils.project").get_project_root()

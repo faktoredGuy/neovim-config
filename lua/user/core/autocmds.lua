@@ -9,14 +9,6 @@ vim.api.nvim_create_autocmd('lspattach', {
   end,
 })
 
--- Odin
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "odin",
-  callback = function()
-    vim.env.ODIN_ROOT = "/usr/lib/odin"
-  end
-})
-
 -- Auto-cwd
 local last_cwd = nil
 vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
@@ -30,28 +22,13 @@ vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter" }, {
   end,
 })
 
--- Sync terminals on dir change
-vim.api.nvim_create_autocmd("DirChanged", {
-  callback = function()
-    local dir = vim.fn.getcwd()
-    local ok, terminals = pcall(require, "toggleterm.terminal")
-    if ok then
-      for _, term in ipairs(terminals.get_all()) do
-        if term.job_id then
-          vim.api.nvim_chan_send(term.job_id, "cd " .. vim.fn.shellescape(dir) .. "\n")
-        end
-      end
-    end
-  end,
-})
-
 -- Alpha dashboard on startup
-vim.api.nvim_create_autocmd("vimenter", {
-  callback = function()
-    if vim.fn.argc() == 0 and vim.fn.line2byte('$') == -1 and vim.bo.buftype == '' then
-      pcall(function()
-       require("alpha").start(true)
+vim.api.nvim_create_autocmd("VimEnter", {
+  callback = function ()
+    if vim.fn.argc() == 0 then
+      vim.schedule(function ()
+        require("alpha").start(true)
       end)
     end
-  end,
+  end
 })

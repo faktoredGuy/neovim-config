@@ -16,7 +16,7 @@ return {
     }
 
     dashboard.section.buttons.val = {
-      dashboard.button("f", "󰈞  Find file", "<cmd>Telescope find_files<cr>"),
+      dashboard.button("f", "󰈞  Find file", "<cmd>FFFFind<cr>"),
       dashboard.button("r", "󰄉  Recent files", "<cmd>Telescope oldfiles<cr>"),
       dashboard.button("n", "󰝒  New file", "<cmd>enew<cr>"),
       dashboard.button("c", "  Config", "<cmd>e " .. vim.fn.stdpath("config") .. "/init.lua<cr>"),
