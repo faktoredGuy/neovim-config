@@ -17,15 +17,3 @@ map('n', '<c-q>', '<cmd>BufferClose<cr>', { desc = 'close buffer' })
 
 -- neo-tree
 map('n', '<leader>e', '<cmd>Neotree toggle<cr>', { desc = 'explorer neotree' })
-
-map('n', '<leader>cd', function()
-  local dir = require("user.utils.project").get_project_root()
-  if dir == '' then return end
-  vim.notify("sync terminals to: " .. dir)
-  local terminals = require("toggleterm.terminal")
-  for _, term in ipairs(terminals.get_all()) do
-    if term:is_open() then
-      vim.api.nvim_chan_send(term.job_id, "cd " .. vim.fn.shellescape(dir) .. "\n")
-    end
-  end
-end, { desc = 'sync terminal to current file directory' })
