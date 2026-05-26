@@ -1,9 +1,0 @@
-return {
-    "savq/melange-nvim",
-    lazy = false,
-    priority = 1000,
-    config = function ()
-      vim.g.melange_statusline = "dark"
-      vim.cmd.colorscheme 'melange'
-    end,
-}

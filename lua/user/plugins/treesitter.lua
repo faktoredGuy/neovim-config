@@ -1,5 +1,8 @@
 return {
   "nvim-treesitter/nvim-treesitter",
+  dependencies = {
+    "nvim-treesitter/nvim-treesitter-textobjects",
+  },
   build = ":TSUpdate",
   event = { "BufReadPost", "BufNewFile" },
   config = function()
@@ -9,7 +12,6 @@ return {
     end
 
     configs.setup({
-
       ensure_installed = {
         "lua", "vim", "vimdoc", "json", "jsonc",
         "bash", "yaml", "markdown", "odin", "cpp",
@@ -25,6 +27,29 @@ return {
       indent = { enable = true },
 
       semantic_tokens = { enable = true },
+    })
+    require("nvim-treesitter.configs").setup({
+      textobjects = {
+        select = {
+          enable = true,
+          lookahead = true,
+          keymaps = {
+
+          },
+          move = {
+            enable = true,
+            set_jumps = true,
+            goto_next_start = {
+              ["]m"] = "@function.outer",
+              ["]]"] = "@class.outer",
+            },
+            goto_previous_start = {
+              ["[m"] = "@function.outer",
+              ["[["] = "@class.outer",
+            },
+          }
+        },
+      },
     })
   end,
 }
