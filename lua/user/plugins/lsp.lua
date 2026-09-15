@@ -3,29 +3,21 @@ return {
     "neovim/nvim-lspconfig",
     event = { "BufReadPre", "BufNewFile" },
     dependencies = {
-      "hrsh7th/cmp-nvim-lsp",
+      "saghen/blink.cmp",
     },
     config = function()
-
-      local capabilities = require('cmp_nvim_lsp').default_capabilities()
+      local capabilities = require("blink.cmp").get_lsp_capabilities()
 
       local function get_root(markers)
-        return vim.fs.root(0, markers)
+        return function(fname)
+          return vim.fs.root(fname, markers)
+        end
       end
 
-      -- OLS
-      local ols_path = vim.fn.stdpath("data") .. "/mason/bin/ols"
-      vim.lsp.config("ols", {
-        cmd = { ols_path },
-        capabilities = capabilities,
-        root_dir = get_root({"ols.json", ".git"}),
-      })
-      vim.lsp.enable("ols")
-
-      -- C++
+      -- C++ (clangd)
       vim.lsp.config("clangd", {
         capabilities = capabilities,
-        root_dir = get_root({"compile_commands.json", "compile_flags.txt", ".git"}),
+        root_dir = get_root({ "compile_commands.json", "compile_flags.txt", ".git" }),
       })
       vim.lsp.enable("clangd")
 
