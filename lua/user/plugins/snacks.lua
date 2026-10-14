@@ -22,12 +22,6 @@ return {
         header = [[ If you can stay calm in place where others can't, 
         you can reach that others can't ]],
 
---  █████╗ ██████╗ ██╗  ██╗███████╗██╗██╗   ██╗███████╗
--- ██╔══██╗██╔══██╗██║ ██╔╝██ ╔═══╝██║███╗  ██║██ ╔═══╝
--- ███████║██████╔╝█████╔╝ ██████╗ ██║█████╗██║██████╗
--- ██╔══██║██╔══██╗██╔═██╗ ██ ╔══╝ ██║██╔═████║██ ╔══╝
--- ██║  ██║██║  ██║██║  ██╗███████╗██║██║  ╚██║███████╗
--- ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝╚═╝   ╚═╝ ╚═════╝
         keys = {
           { icon = "󰈞 ", key = "f", desc = "find file", action = ":lua Snacks.picker.files()" },
           { icon = "󰄉 ", key = "r", desc = "recent files", action = ":lua Snacks.picker.recent()" },
@@ -63,15 +57,15 @@ return {
     indent = {
       enabled = true,
       indent = {
-      },
-      scope = { enabled = false },
-      hl = {
-        "SnacksIndent1",
-        "SnacksIndent2",
-        "SnacksIndent3",
-        "SnacksIndent4",
-        "SnacksIndent5",
-      },
+        char = "│",
+        hl = {
+          "SnacksIndent1",
+          "SnacksIndent2",
+          "SnacksIndent3",
+          "SnacksIndent4",
+          "SnacksIndent5",
+        }
+    }
     },
 
     terminal = {
